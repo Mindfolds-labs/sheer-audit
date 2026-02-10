@@ -1,4 +1,4 @@
-# 🔍 Sheer Audit (Ushel)
+# 🔍 Sheer Audit 
 
 Sistema profissional de análise de código Python (static analysis + modelagem semântica do repositório), com geração de relatórios, UML e validação de arquitetura.
 
