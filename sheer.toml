@@ -1,0 +1,35 @@
+﻿[project]
+name = "SheerAudit"
+root = "."
+
+[scan]
+include_dirs = ["."]
+exclude_dirs = [".git", "__pycache__", ".venv", "venv", "dist", "build"]
+max_file_kb = 512
+include_tests = true
+
+[audit]
+scope = ["."]
+exclude = ["tests", "tools"]
+
+[parser]
+mode = "tolerant"
+python_version = "3.11"
+
+[trace]
+enabled = true
+output_dir = "artifacts/trace"
+max_depth = 200
+ignore_modules = ["typing", "dataclasses", "_pytest", "pluggy"]
+
+[uml]
+engine = "plantuml"
+output_dir = "artifacts/uml"
+
+[uml.sequence]
+max_depth = 60
+
+[docs]
+adr_dir = "docs/adr"
+blueprints_dir = "docs/blueprints"
+atas_dir = "docs/atas"

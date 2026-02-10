@@ -1,0 +1,34 @@
+﻿SHEER AUDIT - COMANDOS
+
+INSTALAÇÃO:
+  cd tools\sheer-audit
+  pip install -e .
+
+SCAN:
+  sheer scan . --out artifacts/scan/repo_model.json
+
+REPORTS:
+  sheer report md . -o reports/report.md
+  sheer report csv . -o reports/map.csv
+  sheer report adr-index -o reports/adrs.csv
+
+UML:
+  sheer uml class . -o artifacts/uml/class.puml
+  sheer uml package . -o artifacts/uml/package.puml
+
+TRACE:
+  sheer trace pytest .
+  sheer uml sequence --from-trace artifacts/trace/events.jsonl
+
+AST:
+  sheer ast parse-check .
+  sheer ast dump src/file.py
+
+MÉTRICAS:
+  - total_files
+  - total_symbols
+  - total_classes
+  - total_functions
+  - syntax_errors
+
+AUTOR: JRDUAES90@GMAIL.COM
