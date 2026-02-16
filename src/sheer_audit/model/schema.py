@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import Optional, Literal, Dict, List
+from typing import Any, Dict, List, Literal, Optional
 
 SymbolKind = Literal['module', 'class', 'function', 'method']
 EdgeType = Literal['IMPORT', 'CONTAINS', 'INHERITS', 'CALLS', 'TRACE_CALL', 'LAYER_VIOLATION']
@@ -38,7 +38,7 @@ class Finding(BaseModel):
     column: Optional[int] = None
     message: str
     hint: Optional[str] = None
-    excerpt: Optional[Dict[str, any]] = None
+    excerpt: Optional[Dict[str, Any]] = None
 
 class RepoModel(BaseModel):
     schema_version: str = '2.0'
