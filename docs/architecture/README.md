@@ -22,6 +22,7 @@ O Sheer é uma ferramenta de auditoria estática e governança técnica que:
 - [Modelo de Execução](execution_model.md)
 - [Fluxo de Dados e Evidência](data_flow.md)
 - [Modelo de Segurança](security_model.md)
+- [Camada de Governança](governance_layer.md)
 
 ## Decisões Arquiteturais (ADR)
 - [ADR Index](adr/README.md)
