@@ -1,34 +1,27 @@
-﻿SHEER AUDIT - COMANDOS
+SHEER AUDIT - COMANDOS
 
 INSTALAÇÃO:
-  cd tools\sheer-audit
   pip install -e .
 
-SCAN:
-  sheer scan . --out artifacts/scan/repo_model.json
+AUDITORIA AVANÇADA:
+  sheer advanced --full-scan --ieee --export docs/sheer_audit
+  sheer audit-secure --repo-path . --vault-path docs/sheer_audit/vault/audit.sheerdb
 
-REPORTS:
-  sheer report md . -o reports/report.md
-  sheer report csv . -o reports/map.csv
-  sheer report adr-index -o reports/adrs.csv
+SNAPSHOTS E EVOLUÇÃO:
+  sheer snapshot --id s1 --repo-path . --ref main
+  sheer snapshot --id s2 --repo-path . --ref release-2.1
+  sheer evolution --old s1 --new s2
 
-UML:
-  sheer uml class . -o artifacts/uml/class.puml
-  sheer uml package . -o artifacts/uml/package.puml
+PREFLIGHT IA (PRIVILÉGIO MÍNIMO):
+  sheer preflight --role USER_IA_SERVICE --log-dir docs/sheer_audit --snapshot-id s2
 
-TRACE:
-  sheer trace pytest .
-  sheer uml sequence --from-trace artifacts/trace/events.jsonl
+BANCO DE DADOS:
+  sheer db --verify
+  sheer db --list-snapshots
+  sheer db --export-csv artifacts/db/audit.csv
 
-AST:
-  sheer ast parse-check .
-  sheer ast dump src/file.py
-
-MÉTRICAS:
-  - total_files
-  - total_symbols
-  - total_classes
-  - total_functions
-  - syntax_errors
-
-AUTOR: JRDUAES90@GMAIL.COM
+GOVERNANÇA:
+  # gerado pelo comando `sheer evolution`
+  # issue -> docs/issues/0004-evolution-generated.md
+  # ADR   -> docs/architecture/adr/ADR-0020-evolution-governance.md
+  # blueprint -> docs/BLUEPRINT.md
