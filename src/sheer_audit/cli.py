@@ -184,8 +184,130 @@ def snapshot_command(
     )
 
 
-@evolution_app.command("diff")
-def evolution_diff_command(
+@app.command("analyze")
+def analyze_command(
+    component: list[str] = typer.Option([], "--component", help="Filtro de componente(s) por substring."),
+    repo_path: str = typer.Option(".", help="Raiz do repositório analisado."),
+    output: str = typer.Option("docs/sheeraudit/2.0.0/component_analysis.json", help="Saída JSON."),
+) -> None:
+    """Executa análise granular por componente (um ou vários)."""
+
+    engine = SheerAdvancedEngine(repo_path)
+    components = engine.build_component_inventory()
+    findings = engine.detect_structural_errors()
+
+    if component:
+        filters = [token.lower() for token in component]
+        components = [
+            item for item in components if any(token in str(item["id"]).lower() for token in filters)
+        ]
+        findings = [
+            item
+            for item in findings
+            if any(token in str(item["file"]).lower() for token in filters)
+        ]
+
+    payload = {
+        "repo_path": str(Path(repo_path).resolve()),
+        "filters": component,
+        "components_total": len(components),
+        "findings_total": len(findings),
+        "components": components,
+        "findings": findings,
+    }
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    console.print(f"🔎 Análise de componentes exportada para {target}")
+
+
+@blueprint_app.command("generate")
+def blueprint_generate_command(
+    snapshot_id: str = typer.Option("", help="Snapshot opcional para gerar blueprint persistido."),
+    repo_path: str = typer.Option(".", help="Raiz do repositório analisado (fallback)."),
+    output: str = typer.Option("docs/BLUEPRINT.md", help="Arquivo markdown de saída."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Gera blueprint arquitetural atual."""
+
+    components: list[dict[str, object]]
+    findings: list[dict[str, object]]
+    source = "workspace"
+
+    if snapshot_id:
+        db = SheerDBEngine(vault_path=vault_path)
+        snapshot = db.get_snapshot(snapshot_id)
+        if snapshot is None:
+            raise typer.BadParameter("Snapshot não encontrado para gerar blueprint.")
+        components = list(snapshot.get("components", []))
+        findings = list(snapshot.get("findings", []))
+        source = f"snapshot:{snapshot_id}"
+    else:
+        engine = SheerAdvancedEngine(repo_path)
+        components = engine.build_component_inventory()
+        findings = engine.detect_structural_errors()
+
+    by_kind: dict[str, int] = {}
+    for component in components:
+        kind = str(component.get("kind", "Unknown"))
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+
+    lines = [
+        "# Blueprint de Arquitetura",
+        "",
+        f"- Fonte: `{source}`",
+        f"- Componentes: **{len(components)}**",
+        f"- Findings: **{len(findings)}**",
+        "",
+        "## Distribuição por tipo",
+    ]
+    lines.extend([f"- {kind}: **{count}**" for kind, count in sorted(by_kind.items())])
+
+    if components:
+        lines.extend(["", "## Componentes amostrados"])
+        for item in sorted(components, key=lambda row: str(row.get("id", "")))[:20]:
+            lines.append(f"- `{item.get('id', '<unknown>')}` ({item.get('kind', 'Unknown')})")
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"🧭 Blueprint gerado em {target}")
+
+
+@blueprint_app.command("diff")
+def blueprint_diff_command(
+    old_snapshot: str = typer.Option(..., "--old", help="Snapshot base."),
+    new_snapshot: str = typer.Option(..., "--new", help="Snapshot alvo."),
+    output: str = typer.Option("docs/sheeraudit/2.0.0/reports/BLUEPRINT_DIFF.md", help="Arquivo markdown."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Gera diff arquitetural entre snapshots."""
+
+    db = SheerDBEngine(vault_path=vault_path)
+    diff = db.diff_snapshots(old_snapshot, new_snapshot)
+    lines = [
+        f"# Blueprint Diff `{old_snapshot}` → `{new_snapshot}`",
+        "",
+        "## Componentes",
+        f"- Adicionados: **{len(diff['components']['added'])}**",
+        f"- Removidos: **{len(diff['components']['removed'])}**",
+        f"- Alterados: **{len(diff['components']['changed'])}**",
+        "",
+        "## Findings",
+        f"- Novos: **{diff['findings']['new']}**",
+        f"- Resolvidos: **{diff['findings']['resolved']}**",
+        f"- Persistentes: **{diff['findings']['persistent']}**",
+    ]
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"🧩 Blueprint diff salvo em {target}")
+
+
+@app.command("evolution")
+def evolution_command(
     old_snapshot: str = typer.Option(..., "--old", help="Snapshot base para comparação."),
     new_snapshot: str = typer.Option(..., "--new", help="Snapshot alvo para comparação."),
     markdown_out: str = typer.Option("docs/sheer_audit/RELATORIO_EVOLUCAO.md", help="Relatório de evolução."),

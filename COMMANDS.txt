@@ -25,3 +25,13 @@ GOVERNANÇA:
   # issue -> docs/issues/0004-evolution-generated.md
   # ADR   -> docs/architecture/adr/ADR-0020-evolution-governance.md
   # blueprint -> docs/BLUEPRINT.md
+
+
+ANÁLISE GRANULAR E BLUEPRINT:
+  sheer analyze --repo-path . --component src/sheer_audit/cli.py
+  sheer blueprint generate --snapshot-id s2 --vault-path docs/sheeraudit/2.0.0/logs/audit.sheerdb
+  sheer blueprint diff --old s1 --new s2 --vault-path docs/sheeraudit/2.0.0/logs/audit.sheerdb
+
+EVOLUÇÃO VISUAL:
+  sheer evolution-graph --vault-path docs/sheeraudit/2.0.0/logs/audit.sheerdb
+  sheer evolution-health --vault-path docs/sheeraudit/2.0.0/logs/audit.sheerdb
