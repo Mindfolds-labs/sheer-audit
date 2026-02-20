@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import ast
-import json
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Set
@@ -36,6 +36,7 @@ class SheerAdvancedEngine:
         """Mapeia componentes X (arquivo:símbolo) e Y (profundidade de chamada lexical)."""
 
         coordinates: List[Dict[str, object]] = []
+        complexity_vector: List[Dict[str, object]] = []
         max_depth = 0
 
         for file_path in self._iter_python_files():
@@ -54,7 +55,18 @@ class SheerAdvancedEngine:
                     depth = len(stack)
                     max_depth = max(max_depth, depth)
                     name = getattr(node, "name", "<anonymous>")
-                    coordinates.append({"x": f"{relative}:{name}", "y": depth, "kind": type(node).__name__})
+                    component_id = f"{relative}:{name}"
+                    coordinates.append({"x": component_id, "y": depth, "kind": type(node).__name__})
+                    complexity = self._calculate_component_complexity(node=node, depth=depth)
+                    complexity_vector.append(
+                        {
+                            "x": component_id,
+                            "y": depth,
+                            "stage_impact": complexity["stage_impact"],
+                            "depth_weight": complexity["depth_weight"],
+                            "partial_derivative": complexity["partial_derivative"],
+                        }
+                    )
                     stack.append(node)
                     for child in ast.iter_child_nodes(node):
                         walk(child)
@@ -68,9 +80,40 @@ class SheerAdvancedEngine:
 
         return {
             "model": "R subset CxFxE",
-            "equation": "F(x,y)=sum_i d(Module_x)/d(Stage_y)",
+            "equation": "F(x,y)=sum_i ∂(Etapa_y)/δ(Modulo_x)",
             "coordinates": sorted(coordinates, key=lambda item: (item["x"], item["y"])),
+            "complexity_vector": sorted(complexity_vector, key=lambda item: (item["x"], item["y"])),
+            "complexity_total": round(sum(float(item["partial_derivative"]) for item in complexity_vector), 6),
             "max_depth": max_depth,
+        }
+
+    def _calculate_component_complexity(self, node: ast.AST, depth: int) -> Dict[str, object]:
+        stage_counts = {"decorators": 0, "conditionals": 0, "loops": 0}
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            stage_counts["decorators"] = len(getattr(node, "decorator_list", []))
+
+        for child in ast.walk(node):
+            if child is not node and isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(child, ast.If):
+                stage_counts["conditionals"] += 1
+            elif isinstance(child, (ast.For, ast.AsyncFor, ast.While)):
+                stage_counts["loops"] += 1
+
+        stage_impact = (
+            stage_counts["decorators"] * 1.5
+            + stage_counts["conditionals"] * 1.2
+            + stage_counts["loops"] * 1.7
+        )
+        depth_weight = float(2 ** max(depth - 5, 0))
+        partial_derivative = round(stage_impact * depth_weight, 6)
+
+        return {
+            "stage_counts": stage_counts,
+            "stage_impact": round(stage_impact, 6),
+            "depth_weight": depth_weight,
+            "partial_derivative": partial_derivative,
         }
 
     def _collect_import_graph(self) -> Dict[str, Set[str]]:
@@ -79,12 +122,12 @@ class SheerAdvancedEngine:
 
         for file_path in self._iter_python_files():
             rel = file_path.relative_to(self.repo_path)
-            module_name = ".".join(rel.with_suffix("").parts)
+            module_name = self._module_name_from_path(rel)
             repo_modules.add(module_name)
 
         for file_path in self._iter_python_files():
             rel = file_path.relative_to(self.repo_path)
-            module_name = ".".join(rel.with_suffix("").parts)
+            module_name = self._module_name_from_path(rel)
             imports: Set[str] = set()
             source = file_path.read_text(encoding="utf-8", errors="replace")
             try:
@@ -103,6 +146,13 @@ class SheerAdvancedEngine:
             graph[module_name] = {imp for imp in imports if imp in repo_modules}
 
         return graph
+
+
+    def _module_name_from_path(self, relative_path: Path) -> str:
+        module_name = ".".join(relative_path.with_suffix("").parts)
+        if module_name.endswith(".__init__"):
+            return module_name[: -len(".__init__")]
+        return module_name
 
     def detect_structural_errors(self) -> List[Dict[str, object]]:
         """Detecta erros estruturais determinísticos (syntax + dependência circular)."""
@@ -165,6 +215,8 @@ class SheerAdvancedEngine:
                 )
             )
 
+        errors.extend(self.detect_prohibited_reachability())
+
         return [
             {
                 "file": e.file,
@@ -175,6 +227,58 @@ class SheerAdvancedEngine:
             }
             for e in sorted(errors, key=lambda item: (item.file, item.line, item.error_type))
         ]
+
+    def detect_prohibited_reachability(self) -> List[StructuralError]:
+        """Detecta caminhos proibidos entre camadas (ADR-0012) por busca em largura."""
+
+        graph = self._collect_import_graph()
+        layer_of: Dict[str, str] = {module: self._infer_layer(module) for module in graph}
+        rules = [{"from": "core", "to": "io", "impact": "HIGH"}]
+
+        violations: List[StructuralError] = []
+
+        for rule in rules:
+            start_nodes = sorted(module for module, layer in layer_of.items() if layer == rule["from"])
+            target_nodes = {module for module, layer in layer_of.items() if layer == rule["to"]}
+            for start in start_nodes:
+                queue: List[List[str]] = [[start]]
+                visited: Set[str] = set()
+                while queue:
+                    path = queue.pop(0)
+                    node = path[-1]
+                    if node in visited:
+                        continue
+                    visited.add(node)
+                    if node in target_nodes and len(path) > 1:
+                        violations.append(
+                            StructuralError(
+                                file=f"{start.replace('.', '/')}.py",
+                                line=1,
+                                error_type="ForbiddenReachability",
+                                impact=str(rule["impact"]),
+                                fix=(
+                                    "Eliminar caminho proibido entre camadas: "
+                                    + " -> ".join(path)
+                                ),
+                            )
+                        )
+                        break
+
+                    for nxt in sorted(graph.get(node, set())):
+                        if nxt not in visited:
+                            queue.append(path + [nxt])
+
+        return violations
+
+    def _infer_layer(self, module_name: str) -> str:
+        tokens = set(module_name.split("."))
+        if "core" in tokens:
+            return "core"
+        if tokens.intersection({"scan", "stages", "db", "cli", "model"}):
+            return "io"
+        if "governance" in tokens:
+            return "policy"
+        return "unknown"
 
 
 
