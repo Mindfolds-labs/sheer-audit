@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
+from .db.triggers import run_forward_fix_audit
 from .governance.axisfolds import AxisFoldsLock
 from .model.db_engine import SheerDBEngine
 from .scan.advanced import SheerAdvancedEngine
@@ -39,6 +41,59 @@ def advanced(
     if ieee:
         manifest = engine.export_ieee_pack(export)
         console.print(f"Relatórios IEEE gerados em {export} com {manifest['metrics']}.")
+
+
+@app.command()
+def scan(
+    target_path: str = typer.Argument("docs/", help="Escopo alvo da varredura."),
+    output: str = typer.Option("docs/sheeraudit/2.0.0/repo_model.json", help="Arquivo JSON de saída."),
+    mode: str = typer.Option("stability-check", help="Modo de execução da auditoria."),
+    db_user: str = typer.Option("USER_IA_SERVICE", "--db-user", help="Identidade de serviço para trilha."),
+    audit_version: str = typer.Option("2.0.0", help="Versão da linha de auditoria."),
+    vault_path: str = typer.Option("docs/sheeraudit/2.0.0/logs/audit.sheerdb", help="Vault append-only."),
+) -> None:
+    """Executa scan com gatilho Forward-Fix e consolida evidências."""
+
+    result = run_forward_fix_audit(
+        target_path=target_path,
+        reports_path=f"docs/sheeraudit/{audit_version}/reports",
+        repo_path=".",
+        run_id=f"{audit_version}-{mode}",
+    )
+
+    payload = {
+        "audit_version": audit_version,
+        "mode": mode,
+        "db_user": db_user,
+        "target_path": target_path,
+        "status": result["status"],
+        "findings": result["findings"],
+        "artifacts": result["artifacts"],
+    }
+
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    db = SheerDBEngine(vault_path=vault_path)
+    db.commit_record(
+        "forward_fix_runs",
+        {
+            "audit_version": audit_version,
+            "mode": mode,
+            "db_user": db_user,
+            "target_path": target_path,
+            "status": result["status"],
+            "run_id": result["artifacts"].get("run_id", f"{audit_version}-{mode}"),
+        },
+        timestamp=f"audit-{audit_version}",
+    )
+
+    if result["status"] == "failed":
+        console.print("❌ Falhas encontradas. Issues/ADRs de correção foram geradas.")
+    else:
+        console.print("✅ Auditoria limpa. Snapshot pronto para publicação.")
+    console.print(f"Snapshot salvo em {output_path}")
 
 
 @app.command()

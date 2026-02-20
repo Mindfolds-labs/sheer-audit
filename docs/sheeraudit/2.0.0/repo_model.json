@@ -1,0 +1,14 @@
+{
+  "audit_version": "2.0.0",
+  "mode": "stability-check",
+  "db_user": "USER_IA_SERVICE",
+  "target_path": "docs/",
+  "status": "clean",
+  "findings": {
+    "target_path": "docs/",
+    "critical_errors": false,
+    "affected_files": [],
+    "error_details": []
+  },
+  "artifacts": {}
+}
