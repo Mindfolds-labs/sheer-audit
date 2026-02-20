@@ -1,3 +1,4 @@
+from .axisfolds import AxisFoldsLock
 from .planning import (
     GovernanceBundle,
     GovernanceIssue,
@@ -6,6 +7,7 @@ from .planning import (
 )
 
 __all__ = [
+    "AxisFoldsLock",
     "GovernanceBundle",
     "GovernanceIssue",
     "build_governance_bundle",
