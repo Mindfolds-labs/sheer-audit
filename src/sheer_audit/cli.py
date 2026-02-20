@@ -18,7 +18,10 @@ from .model.schema import Finding, RepoInfo, RepoModel
 from .scan.advanced import SheerAdvancedEngine
 
 app = typer.Typer(help="Sheer Audit CLI")
+blueprint_app = typer.Typer(help="Comandos de blueprint arquitetural.")
 console = Console()
+
+app.add_typer(blueprint_app, name="blueprint")
 
 
 @app.command()
@@ -176,6 +179,128 @@ def snapshot_command(
     )
 
 
+@app.command("analyze")
+def analyze_command(
+    component: list[str] = typer.Option([], "--component", help="Filtro de componente(s) por substring."),
+    repo_path: str = typer.Option(".", help="Raiz do repositório analisado."),
+    output: str = typer.Option("docs/sheeraudit/2.0.0/component_analysis.json", help="Saída JSON."),
+) -> None:
+    """Executa análise granular por componente (um ou vários)."""
+
+    engine = SheerAdvancedEngine(repo_path)
+    components = engine.build_component_inventory()
+    findings = engine.detect_structural_errors()
+
+    if component:
+        filters = [token.lower() for token in component]
+        components = [
+            item for item in components if any(token in str(item["id"]).lower() for token in filters)
+        ]
+        findings = [
+            item
+            for item in findings
+            if any(token in str(item["file"]).lower() for token in filters)
+        ]
+
+    payload = {
+        "repo_path": str(Path(repo_path).resolve()),
+        "filters": component,
+        "components_total": len(components),
+        "findings_total": len(findings),
+        "components": components,
+        "findings": findings,
+    }
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    console.print(f"🔎 Análise de componentes exportada para {target}")
+
+
+@blueprint_app.command("generate")
+def blueprint_generate_command(
+    snapshot_id: str = typer.Option("", help="Snapshot opcional para gerar blueprint persistido."),
+    repo_path: str = typer.Option(".", help="Raiz do repositório analisado (fallback)."),
+    output: str = typer.Option("docs/BLUEPRINT.md", help="Arquivo markdown de saída."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Gera blueprint arquitetural atual."""
+
+    components: list[dict[str, object]]
+    findings: list[dict[str, object]]
+    source = "workspace"
+
+    if snapshot_id:
+        db = SheerDBEngine(vault_path=vault_path)
+        snapshot = db.get_snapshot(snapshot_id)
+        if snapshot is None:
+            raise typer.BadParameter("Snapshot não encontrado para gerar blueprint.")
+        components = list(snapshot.get("components", []))
+        findings = list(snapshot.get("findings", []))
+        source = f"snapshot:{snapshot_id}"
+    else:
+        engine = SheerAdvancedEngine(repo_path)
+        components = engine.build_component_inventory()
+        findings = engine.detect_structural_errors()
+
+    by_kind: dict[str, int] = {}
+    for component in components:
+        kind = str(component.get("kind", "Unknown"))
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+
+    lines = [
+        "# Blueprint de Arquitetura",
+        "",
+        f"- Fonte: `{source}`",
+        f"- Componentes: **{len(components)}**",
+        f"- Findings: **{len(findings)}**",
+        "",
+        "## Distribuição por tipo",
+    ]
+    lines.extend([f"- {kind}: **{count}**" for kind, count in sorted(by_kind.items())])
+
+    if components:
+        lines.extend(["", "## Componentes amostrados"])
+        for item in sorted(components, key=lambda row: str(row.get("id", "")))[:20]:
+            lines.append(f"- `{item.get('id', '<unknown>')}` ({item.get('kind', 'Unknown')})")
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"🧭 Blueprint gerado em {target}")
+
+
+@blueprint_app.command("diff")
+def blueprint_diff_command(
+    old_snapshot: str = typer.Option(..., "--old", help="Snapshot base."),
+    new_snapshot: str = typer.Option(..., "--new", help="Snapshot alvo."),
+    output: str = typer.Option("docs/sheeraudit/2.0.0/reports/BLUEPRINT_DIFF.md", help="Arquivo markdown."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Gera diff arquitetural entre snapshots."""
+
+    db = SheerDBEngine(vault_path=vault_path)
+    diff = db.diff_snapshots(old_snapshot, new_snapshot)
+    lines = [
+        f"# Blueprint Diff `{old_snapshot}` → `{new_snapshot}`",
+        "",
+        "## Componentes",
+        f"- Adicionados: **{len(diff['components']['added'])}**",
+        f"- Removidos: **{len(diff['components']['removed'])}**",
+        f"- Alterados: **{len(diff['components']['changed'])}**",
+        "",
+        "## Findings",
+        f"- Novos: **{diff['findings']['new']}**",
+        f"- Resolvidos: **{diff['findings']['resolved']}**",
+        f"- Persistentes: **{diff['findings']['persistent']}**",
+    ]
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"🧩 Blueprint diff salvo em {target}")
+
+
 @app.command("evolution")
 def evolution_command(
     old_snapshot: str = typer.Option(..., "--old", help="Snapshot base para comparação."),
@@ -232,6 +357,91 @@ def evolution_command(
         "📈 Evolução gerada com sucesso: "
         f"relatório={markdown_out}, issue={issue_out}, adr={adr_out}, blueprint={blueprint_out}."
     )
+
+
+@app.command("evolution-graph")
+def evolution_graph_command(
+    output: str = typer.Option("docs/sheeraudit/2.0.0/reports/EVOLUTION_GRAPH.md", help="Arquivo markdown."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Gera timeline Mermaid de snapshots e regressões."""
+
+    db = SheerDBEngine(vault_path=vault_path)
+    snapshots = db.list_snapshots()
+    if len(snapshots) < 2:
+        raise typer.BadParameter("Necessário pelo menos 2 snapshots para gerar gráfico de evolução.")
+
+    timeline: list[dict[str, object]] = []
+    for index in range(1, len(snapshots)):
+        previous = snapshots[index - 1]
+        current = snapshots[index]
+        previous_id = str(previous.get("snapshot_id", ""))
+        current_id = str(current.get("snapshot_id", ""))
+        diff = db.diff_snapshots(previous_id, current_id)
+        timeline.append(
+            {
+                "from": previous_id,
+                "to": current_id,
+                "new_findings": diff["findings"]["new"],
+                "resolved_findings": diff["findings"]["resolved"],
+            }
+        )
+
+    lines = ["# Evolution Graph", "", "```mermaid", "graph TD"]
+    for edge in timeline:
+        lines.append(
+            f"    {edge['from']} -->|new:{edge['new_findings']} resolved:{edge['resolved_findings']}| {edge['to']}"
+        )
+    lines.append("```")
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"🕸️ Evolution graph salvo em {target}")
+
+
+@app.command("evolution-health")
+def evolution_health_command(
+    output: str = typer.Option("docs/sheeraudit/2.0.0/reports/EVOLUTION_HEALTH.json", help="Arquivo JSON."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Classifica saúde dos componentes por frequência de mudanças."""
+
+    db = SheerDBEngine(vault_path=vault_path)
+    snapshots = db.list_snapshots()
+    if len(snapshots) < 2:
+        raise typer.BadParameter("Necessário pelo menos 2 snapshots para classificar saúde.")
+
+    change_count: dict[str, int] = {}
+    for index in range(1, len(snapshots)):
+        previous = str(snapshots[index - 1].get("snapshot_id", ""))
+        current = str(snapshots[index].get("snapshot_id", ""))
+        diff = db.diff_snapshots(previous, current)
+        for component_id in diff["components"]["changed"]:
+            change_count[component_id] = change_count.get(component_id, 0) + 1
+
+    stable: list[str] = []
+    evolving: list[str] = []
+    unstable: list[str] = []
+    for component_id, score in sorted(change_count.items()):
+        if score >= 3:
+            unstable.append(component_id)
+        elif score == 2:
+            evolving.append(component_id)
+        else:
+            stable.append(component_id)
+
+    payload = {
+        "snapshots_considered": len(snapshots),
+        "stable": stable,
+        "evolving": evolving,
+        "unstable": unstable,
+    }
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    console.print(f"🩺 Evolution health salvo em {target}")
 
 
 @app.command("preflight")
