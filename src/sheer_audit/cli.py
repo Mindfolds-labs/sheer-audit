@@ -13,11 +13,19 @@ from rich.console import Console
 from .governance.axisfolds import AxisFoldsLock
 from .governance.planning import build_governance_bundle
 from .model.db_engine import SheerDBEngine
+from .model.hybrid_db import HybridAuditDB
 from .model.schema import Finding, RepoInfo, RepoModel
 from .scan.advanced import SheerAdvancedEngine
 
 app = typer.Typer(help="Sheer Audit CLI")
+analyze_app = typer.Typer(help="Análise granular de componentes")
+blueprint_app = typer.Typer(help="Blueprinting arquitetural")
+evolution_app = typer.Typer(help="Comandos de evolução")
 console = Console()
+
+app.add_typer(analyze_app, name="analyze")
+app.add_typer(blueprint_app, name="blueprint")
+app.add_typer(evolution_app, name="evolution")
 
 
 @app.command()
@@ -122,8 +130,8 @@ def snapshot_command(
     )
 
 
-@app.command("evolution")
-def evolution_command(
+@evolution_app.command("diff")
+def evolution_diff_command(
     old_snapshot: str = typer.Option(..., "--old", help="Snapshot base para comparação."),
     new_snapshot: str = typer.Option(..., "--new", help="Snapshot alvo para comparação."),
     markdown_out: str = typer.Option("docs/sheer_audit/RELATORIO_EVOLUCAO.md", help="Relatório de evolução."),
@@ -180,12 +188,59 @@ def evolution_command(
     )
 
 
+@evolution_app.command("graph")
+def evolution_graph_command(
+    output: str = typer.Option("docs/sheer_audit/EVOLUTION_GRAPH.md", help="Saída markdown do grafo temporal."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Gera linha do tempo de snapshots [falha -> versão -> correção]."""
+
+    db = SheerDBEngine(vault_path=vault_path)
+    snapshots = db.list_snapshots()
+
+    lines = ["# Evolution Graph", "", "| Snapshot | Findings | Componentes | Estado |", "|---|---:|---:|---|"]
+    for snapshot in snapshots:
+        findings_total = int(snapshot.get("metrics", {}).get("findings_total", 0))
+        components_total = int(snapshot.get("metrics", {}).get("components_total", 0))
+        status = "FIXED" if findings_total == 0 else "FAIL"
+        lines.append(
+            f"| {snapshot.get('snapshot_id', 'unknown')} | {findings_total} | {components_total} | {status} |"
+        )
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"📈 Evolution graph gerado em {target.as_posix()}.")
+
+
+@evolution_app.command("health")
+def evolution_health_command(
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Classifica componentes em maduros vs zonas de risco (alto churn)."""
+
+    db = SheerDBEngine(vault_path=vault_path)
+    snapshots = db.list_snapshots()
+    component_changes: dict[str, int] = {}
+    for index in range(1, len(snapshots)):
+        old_id = str(snapshots[index - 1].get("snapshot_id", ""))
+        new_id = str(snapshots[index].get("snapshot_id", ""))
+        diff = db.diff_snapshots(old_id, new_id)
+        for changed in diff["components"]["changed"]:
+            component_changes[changed] = component_changes.get(changed, 0) + 1
+
+    mature = sorted([name for name, churn in component_changes.items() if churn <= 1])
+    risk = sorted([name for name, churn in component_changes.items() if churn > 1])
+    console.print_json(json.dumps({"mature": mature, "risk_zones": risk}, ensure_ascii=False))
+
+
 @app.command("preflight")
 def preflight_command(
     role: str = typer.Option("USER_IA_SERVICE", help="Perfil operacional corrente."),
     log_dir: str = typer.Option("docs/sheer_audit", help="Diretório monitorado para logs."),
     snapshot_id: str = typer.Option("", help="Snapshot esperado para rollback recente."),
     vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+    blob_dir: str = typer.Option("docs/sheer_audit/2.0.0/data", help="Diretório NoSQL de blobs semânticos."),
 ) -> None:
     """Checklist pré-execução para operações de IA com privilégio mínimo."""
 
@@ -193,6 +248,8 @@ def preflight_command(
     checks = {
         "check_role": role == "USER_IA_SERVICE",
         "check_log_dir": Path(log_dir).exists(),
+        "check_db_initialized": Path(vault_path).exists(),
+        "check_blob_path_writable": Path(blob_dir).exists() and Path(blob_dir).is_dir(),
         "check_rollback_snapshot": bool(snapshot_id) and db.get_snapshot(snapshot_id) is not None,
     }
 
@@ -204,6 +261,7 @@ def preflight_command(
 
 @app.command("db")
 def db_command(
+    init: bool = typer.Option(False, "--init", help="Inicializa o SheerDB local."),
     verify: bool = typer.Option(False, "--verify", help="Verifica integridade das assinaturas HMAC."),
     export_csv: str = typer.Option("", "--export-csv", help="Exporta banco para CSV no caminho indicado."),
     list_snapshots: bool = typer.Option(False, "--list-snapshots", help="Lista snapshots persistidos."),
@@ -213,6 +271,10 @@ def db_command(
     """Gerencia operações de manutenção do SheerDB."""
 
     db = SheerDBEngine(vault_path=vault_path)
+
+    if init:
+        path = db.init_storage()
+        console.print(f"SheerDB inicializado em {path}.")
 
     if verify:
         stats = db.verify_integrity()
@@ -230,8 +292,72 @@ def db_command(
         db.purge()
         console.print("Vault removido com sucesso.")
 
-    if not any([verify, export_csv, list_snapshots, purge]):
+    if not any([init, verify, export_csv, list_snapshots, purge]):
         console.print("Nenhuma operação escolhida. Use --help.")
+
+
+@analyze_app.command("component")
+def analyze_component_command(
+    name: str = typer.Argument(..., help="Identificador do componente (arquivo.py:símbolo ou módulo)."),
+    repo_path: str = typer.Option(".", help="Raiz do repositório."),
+    sql_path: str = typer.Option("docs/sheer_audit/vault/lineage.db", help="Banco SQL de linhagem."),
+    blob_root: str = typer.Option("docs/sheer_audit/2.0.0/data", help="Diretório NoSQL de blobs."),
+    version_tag: str = typer.Option("2.0.0", help="Versão de referência para o registro."),
+) -> None:
+    """Analisa um único componente e persiste AST em camada híbrida."""
+
+    engine = SheerAdvancedEngine(repo_path)
+    hybrid = HybridAuditDB(sql_path=sql_path, blob_root=blob_root)
+    component_data = engine.analyze_component(name)
+    record = hybrid.persist_component_audit(component_data=component_data, version_tag=version_tag)
+    console.print_json(json.dumps(record, ensure_ascii=False))
+
+
+@blueprint_app.command("generate")
+def blueprint_generate_command(
+    repo_path: str = typer.Option(".", help="Raiz do repositório."),
+    output: str = typer.Option("docs/BLUEPRINT.md", help="Saída do blueprint markdown."),
+) -> None:
+    """Gera blueprint textual do estado atual."""
+
+    engine = SheerAdvancedEngine(repo_path)
+    components = engine.build_component_inventory()
+    execution_tree = engine.build_execution_tree()
+
+    lines = ["# Blueprint Atual", "", f"- Componentes: **{len(components)}**", "", "## Execução"]
+    for module_name, symbols in execution_tree.items():
+        lines.append(f"- `{module_name}`: {', '.join(symbols)}")
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"🧭 Blueprint gerado em {target.as_posix()}.")
+
+
+@blueprint_app.command("diff")
+def blueprint_diff_command(
+    v1: str = typer.Argument(..., help="Snapshot base."),
+    v2: str = typer.Argument(..., help="Snapshot alvo."),
+    output: str = typer.Option("docs/sheer_audit/BLUEPRINT_DIFF.md", help="Saída do diff."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Mostra alterações arquiteturais entre dois snapshots."""
+
+    db = SheerDBEngine(vault_path=vault_path)
+    diff = db.diff_snapshots(v1, v2)
+    lines = [
+        f"# Blueprint Diff `{v1}` -> `{v2}`",
+        "",
+        "## Componentes",
+        f"- Adicionados: {', '.join(diff['components']['added']) or 'nenhum'}",
+        f"- Removidos: {', '.join(diff['components']['removed']) or 'nenhum'}",
+        f"- Alterados: {', '.join(diff['components']['changed']) or 'nenhum'}",
+    ]
+
+    target = Path(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"🧩 Blueprint diff gerado em {target.as_posix()}.")
 
 
 @app.command()

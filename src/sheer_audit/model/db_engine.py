@@ -21,6 +21,13 @@ class SheerDBEngine:
     def _generate_hmac(self, payload: str) -> str:
         return hmac.new(self.key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
+    def init_storage(self) -> Path:
+        """Inicializa o vault local para comandos de preflight/db init."""
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.touch(exist_ok=True)
+        return self.path
+
     def commit_record(self, table: str, data: Dict[str, object], timestamp: str = "static") -> None:
         """Salva registro assinado em formato SIGNATURE|JSON\\n."""
 
