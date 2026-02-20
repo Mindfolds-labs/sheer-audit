@@ -1,10 +1,10 @@
 # DC-SA-001: Especificação de Análise de Execução e Cartesianização
 
 ## 1. Visão Geral
-Implementação da camada de telemetria estrutural e mapeamento cartesiano baseada em IEEE 1016 (Arquitetura) e IEEE 1028 (Auditoria), integrada ao `src/sheer_audit/`.
+Implementação da camada de telemetria estrutural e mapeamento cartesiano baseada em normas IEEE 1016 (Arquitetura) e 1028 (Auditoria).
 
 ## 2. Modelo Matemático de Fluxo
-A complexidade e o fluxo de execução são definidos pela função:
+A complexidade e o fluxo de execução são definidos pela função de transição de estado:
 
 $$F(x, y) = \sum_{i=1}^{n} \frac{\delta(Módulo_x)}{\partial(Etapa_y)}$$
 

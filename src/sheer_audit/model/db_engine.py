@@ -5,12 +5,13 @@ import hashlib
 import hmac
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
 
 class SheerDBEngine:
-    """SGBD append-only com HMAC para integridade de registros de auditoria."""
+    """Append-only store com assinatura HMAC para evidências de auditoria."""
 
     def __init__(self, vault_path: str = "docs/sheer_audit/vault/audit.sheerdb"):
         self.path = Path(vault_path)
