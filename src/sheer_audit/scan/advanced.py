@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Set
@@ -174,6 +175,40 @@ class SheerAdvancedEngine:
             }
             for e in sorted(errors, key=lambda item: (item.file, item.line, item.error_type))
         ]
+
+
+
+    def build_component_inventory(self) -> List[Dict[str, object]]:
+        """Inventário determinístico de componentes com hash por arquivo/símbolo."""
+
+        inventory: List[Dict[str, object]] = []
+        cartesian = self.generate_cartesian_map()
+        for item in cartesian["coordinates"]:
+            component_id = str(item["x"])
+            digest = hashlib.sha256(component_id.encode("utf-8")).hexdigest()
+            inventory.append(
+                {
+                    "id": component_id,
+                    "kind": item["kind"],
+                    "depth": int(item["y"]),
+                    "hash": digest,
+                }
+            )
+
+        return sorted(inventory, key=lambda value: value["id"])
+
+    def build_execution_tree(self) -> Dict[str, List[str]]:
+        """Mapa de execução lexical (arquivo -> símbolos)."""
+
+        tree: Dict[str, List[str]] = {}
+        for component in self.build_component_inventory():
+            file_part, symbol = str(component["id"]).split(":", 1)
+            tree.setdefault(file_part, []).append(symbol)
+
+        for key in sorted(tree):
+            tree[key] = sorted(tree[key])
+
+        return {key: tree[key] for key in sorted(tree)}
 
     def export_ieee_pack(self, output_dir: str) -> Dict[str, object]:
         """Gera pacote IEEE (docs + manifest JSON) com métricas determinísticas."""
