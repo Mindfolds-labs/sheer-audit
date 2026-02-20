@@ -17,6 +17,8 @@ def test_snapshot_evolution_and_preflight_commands(tmp_path: Path) -> None:
     )
 
     vault = tmp_path / "audit.sheerdb"
+    blobs = tmp_path / "blobs"
+    blobs.mkdir()
     issue = tmp_path / "issues.md"
     adr = tmp_path / "adr.md"
     blueprint = tmp_path / "blueprint.md"
@@ -56,6 +58,7 @@ def test_snapshot_evolution_and_preflight_commands(tmp_path: Path) -> None:
         app,
         [
             "evolution",
+            "diff",
             "--old",
             "s1",
             "--new",
@@ -90,6 +93,8 @@ def test_snapshot_evolution_and_preflight_commands(tmp_path: Path) -> None:
             "s2",
             "--vault-path",
             str(vault),
+            "--blob-dir",
+            str(blobs),
         ],
     )
     assert result_preflight_ok.exit_code == 0
@@ -106,6 +111,77 @@ def test_snapshot_evolution_and_preflight_commands(tmp_path: Path) -> None:
             "s2",
             "--vault-path",
             str(vault),
+            "--blob-dir",
+            str(blobs),
         ],
     )
     assert result_preflight_fail.exit_code == 1
+
+
+def test_new_granular_commands_and_hybrid_persistence(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("def neuron():\n    return 42\n", encoding="utf-8")
+
+    vault = tmp_path / "audit.sheerdb"
+    lineage_sql = tmp_path / "lineage.db"
+    blob_root = tmp_path / "data"
+
+    init_db = runner.invoke(app, ["db", "--init", "--vault-path", str(vault)])
+    assert init_db.exit_code == 0
+    assert vault.exists()
+
+    analyze_component = runner.invoke(
+        app,
+        [
+            "analyze",
+            "component",
+            "mod.py:neuron",
+            "--repo-path",
+            str(repo),
+            "--sql-path",
+            str(lineage_sql),
+            "--blob-root",
+            str(blob_root),
+            "--version-tag",
+            "2.0.0",
+        ],
+    )
+    assert analyze_component.exit_code == 0
+    assert lineage_sql.exists()
+    assert any(blob_root.glob("*.json"))
+
+    blueprint_generate = runner.invoke(
+        app,
+        [
+            "blueprint",
+            "generate",
+            "--repo-path",
+            str(repo),
+            "--output",
+            str(tmp_path / "blueprint.md"),
+        ],
+    )
+    assert blueprint_generate.exit_code == 0
+
+    for snapshot_id in ["s1", "s2"]:
+        result = runner.invoke(
+            app,
+            ["snapshot", "--id", snapshot_id, "--repo-path", str(repo), "--vault-path", str(vault)],
+        )
+        assert result.exit_code == 0
+
+    blueprint_diff = runner.invoke(
+        app,
+        ["blueprint", "diff", "s1", "s2", "--vault-path", str(vault), "--output", str(tmp_path / "b.diff")],
+    )
+    assert blueprint_diff.exit_code == 0
+
+    evolution_graph = runner.invoke(
+        app,
+        ["evolution", "graph", "--vault-path", str(vault), "--output", str(tmp_path / "graph.md")],
+    )
+    assert evolution_graph.exit_code == 0
+
+    evolution_health = runner.invoke(app, ["evolution", "health", "--vault-path", str(vault)])
+    assert evolution_health.exit_code == 0

@@ -210,6 +210,38 @@ class SheerAdvancedEngine:
 
         return {key: tree[key] for key in sorted(tree)}
 
+    def analyze_component(self, component_name: str) -> Dict[str, object]:
+        """Analisa componente único por id `arquivo.py:simbolo` ou por nome de módulo."""
+
+        inventory = self.build_component_inventory()
+        execution_tree = self.build_execution_tree()
+
+        matched = [item for item in inventory if component_name in str(item["id"]) or component_name == str(item["id"]).split(":", 1)[0]]
+        if not matched:
+            return {
+                "component": component_name,
+                "found": False,
+                "components": [],
+                "execution": [],
+            }
+
+        files = sorted({str(item["id"]).split(":", 1)[0] for item in matched})
+        execution: Dict[str, List[str]] = {item: execution_tree.get(item, []) for item in files}
+        ast_blobs: Dict[str, Dict[str, object]] = {}
+        for file_path in files:
+            absolute = self.repo_path / file_path
+            source = absolute.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(source, filename=file_path)
+            ast_blobs[file_path] = ast.dump(tree, annotate_fields=True, include_attributes=False)
+
+        return {
+            "component": component_name,
+            "found": True,
+            "components": sorted(matched, key=lambda item: str(item["id"])),
+            "execution": execution,
+            "ast": ast_blobs,
+        }
+
     def export_ieee_pack(self, output_dir: str) -> Dict[str, object]:
         """Gera pacote IEEE (docs + manifest JSON) com métricas determinísticas."""
 
