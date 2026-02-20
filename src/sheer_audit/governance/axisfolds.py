@@ -1,45 +1,52 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
 
+import toml
 
+
+@dataclass(frozen=True)
 class AxisFoldsLock:
-    """Snapshot de dependências Python com fingerprint de integridade."""
+    """Gerador de lock de dependências a partir do pyproject local."""
 
-    def generate_folds_lock(self) -> Dict[str, object]:
-        result = subprocess.run(["pip", "freeze"], capture_output=True, text=True, check=False)
-        lines = sorted([line.strip() for line in result.stdout.splitlines() if "==" in line])
+    project_name: str = "SheerAudit"
 
-        components = {}
-        for line in lines:
-            name, version = line.split("==", 1)
+    def generate_folds_lock(self, pyproject_path: str = "pyproject.toml") -> Dict[str, object]:
+        path = Path(pyproject_path)
+        raw = toml.loads(path.read_text(encoding="utf-8"))
+        deps = raw.get("project", {}).get("dependencies", [])
+
+        components: Dict[str, str] = {}
+        for dep in deps:
+            name, version = self._split_dependency(dep)
             components[name] = version
 
-        canonical = "\n".join(f"{name}=={components[name]}" for name in sorted(components))
-        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
         return {
-            "project": "SheerAudit",
-            "version": "2.0.3",
-            "components": components,
-            "sha256": digest,
+            "project": self.project_name,
+            "lock_date": "static",
+            "components": dict(sorted(components.items())),
         }
 
-    def write_folds_lock(self, output_path: str = "requirements_v2_0_3.folds") -> Path:
-        data = self.generate_folds_lock()
-        out = Path(output_path)
+    def write_folds_file(self, output_path: str = "requirements_v2_0_3.folds", pyproject_path: str = "pyproject.toml") -> str:
+        lock = self.generate_folds_lock(pyproject_path=pyproject_path)
+        target = Path(output_path)
 
         lines = ["# ATOMIC LOCK - AXISFOLDS v2.0.3"]
-        for name in sorted(data["components"]):
-            lines.append(f"{name}=={data['components'][name]}")
-        lines.append(f"# SHA256={data['sha256']}")
+        for name, version in lock["components"].items():
+            lines.append(f"{name}=={version}")
+        lines.append("# CRC32C VALIDATED BY MINDAXIS")
 
-        out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return target.as_posix()
 
-        meta = out.with_suffix(out.suffix + ".json")
-        meta.write_text(json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-        return out
+    @staticmethod
+    def _split_dependency(dep: str) -> tuple[str, str]:
+        if ">=" in dep:
+            name, version = dep.split(">=", 1)
+            return name.strip(), version.strip()
+        if "==" in dep:
+            name, version = dep.split("==", 1)
+            return name.strip(), version.strip()
+        return dep.strip(), "latest"

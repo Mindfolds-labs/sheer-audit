@@ -1,20 +1,10 @@
 {
   "audit_version": "2.0.3",
-  "compliance": [
-    "IEEE-1016",
-    "IEEE-1028"
-  ],
+  "compliance": ["IEEE-1016", "IEEE-1028"],
   "metrics": {
-    "total_components": 64,
-    "total_relations": 118,
-    "structural_errors": 3
+    "total_classes": 0,
+    "circular_dependencies": 0,
+    "fault_tolerance_score": 1.0
   },
-  "hotspots": [
-    {
-      "component": "src/sheer_audit/scan/repo.py:collect_python_files",
-      "risk": "high",
-      "reason": "high_cyclomatic_complexity",
-      "value": 15
-    }
-  ]
+  "hotspots": []
 }

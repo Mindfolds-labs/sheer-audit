@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import typer
@@ -16,57 +15,41 @@ console = Console()
 
 @app.command()
 def advanced(
-    full_scan: bool = typer.Option(True, help="Executa varredura estrutural completa."),
-    uml: bool = typer.Option(False, help="Emite aviso para etapa UML."),
-    ieee: bool = typer.Option(False, help="Exporta templates IEEE."),
-    export: str = typer.Option("docs/sheer_audit/", help="Diretório de saída de artefatos."),
+    full_scan: bool = typer.Option(True, help="Executa mapeamento cartesiano e detecção estrutural."),
+    uml: bool = typer.Option(False, help="Exibe etapa de UML (placeholder determinístico)."),
+    ieee: bool = typer.Option(False, help="Gera pacote IEEE 1016/1028."),
+    export: str = typer.Option("docs/sheer_audit", help="Diretório de exportação de artefatos."),
 ) -> None:
-    """Executa o modo de engenharia avançada."""
+    """Executa o modo de engenharia avançada IEEE/ITIL."""
 
     console.print("[bold blue]Iniciando Suite de Auditoria Avançada IEEE/ITIL...[/bold blue]")
     engine = SheerAdvancedEngine(".")
-    db = SheerDBEngine()
 
     if full_scan:
-        mapping = engine.generate_cartesian_map()
+        cartesian = engine.generate_cartesian_map()
         errors = engine.detect_structural_errors()
-        for error in errors:
-            db.commit_record("system_errors", error)
-        for component in mapping.get("components", []):
-            db.commit_record("cartesian", component)
-
-        manifest = {
-            "audit_version": "2.0.3",
-            "compliance": ["IEEE-1016", "IEEE-1028"],
-            "metrics": {
-                "total_components": len(mapping.get("components", [])),
-                "total_relations": len(mapping.get("relations", [])),
-                "structural_errors": len(errors),
-            },
-            "hotspots": engine.hotspots,
-        }
-        manifest_path = Path(export) / "ieee" / "IEEE_AUDIT_MANIFEST.json"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
         console.print(
-            f"Indexing completo: {manifest['metrics']['total_components']} componentes, "
-            f"{manifest['metrics']['structural_errors']} erros estruturais."
+            f"Indexing concluído: {len(cartesian['coordinates'])} componentes, "
+            f"{len(errors)} erros estruturais."
         )
 
     if uml:
-        console.print("Gerando Diagramas de Sequência e Classe... (roadmap Fase 5)")
+        console.print("Gerando Diagramas de Sequência e Classe... (roadmap)")
 
     if ieee:
-        engine.export_ieee_pack(export)
-        console.print(f"Relatórios IEEE gerados em {export}")
+        manifest = engine.export_ieee_pack(export)
+        console.print(f"Relatórios IEEE gerados em {export} com {manifest['metrics']}.")
 
 
-@app.command("audit-secure")
-def audit_secure() -> None:
-    """Executa auditoria estrutural e persiste em SheerDB."""
-    engine = SheerAdvancedEngine(".")
-    db = SheerDBEngine()
+@app.command()
+def audit_secure(
+    repo_path: str = typer.Option(".", help="Raiz do repositório para análise."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
+) -> None:
+    """Executa auditoria profunda e salva resultados no SheerDB."""
+
+    engine = SheerAdvancedEngine(repo_path)
+    db = SheerDBEngine(vault_path=vault_path)
 
     errors = engine.detect_structural_errors()
     for error in errors:
@@ -75,40 +58,43 @@ def audit_secure() -> None:
     console.print(f"✅ Auditoria concluída. {len(errors)} registos blindados no SheerDB.")
 
 
-@app.command()
-def db(
-    verify: bool = typer.Option(False, "--verify", help="Verifica integridade de assinaturas."),
-    export_csv: bool = typer.Option(False, "--export-csv", help="Exporta o banco para CSV."),
-    purge: bool = typer.Option(False, "--purge", help="Remove todos os registros do banco."),
-    output: str = typer.Option("docs/sheer_audit/vault/audit.csv", help="Saída para --export-csv."),
+@app.command("db")
+def db_command(
+    verify: bool = typer.Option(False, "--verify", help="Verifica integridade das assinaturas HMAC."),
+    export_csv: str = typer.Option("", "--export-csv", help="Exporta banco para CSV no caminho indicado."),
+    purge: bool = typer.Option(False, "--purge", help="Remove arquivo de banco local."),
+    vault_path: str = typer.Option("docs/sheer_audit/vault/audit.sheerdb", help="Arquivo SheerDB."),
 ) -> None:
-    """Comandos de manutenção do SheerDB."""
+    """Gerencia operações de manutenção do SheerDB."""
 
-    db_engine = SheerDBEngine()
+    db = SheerDBEngine(vault_path=vault_path)
 
     if verify:
-        stats = db_engine.verify_integrity()
-        console.print(f"Registros: {stats['total']} | válidos: {stats['valid']} | inválidos: {stats['invalid']}")
+        stats = db.verify_integrity()
+        console.print(f"Integridade: total={stats['total']} valid={stats['valid']} invalid={stats['invalid']}")
 
     if export_csv:
-        path = db_engine.export_csv(output)
-        console.print(f"CSV exportado em {path}")
+        count = db.export_csv(export_csv)
+        console.print(f"CSV exportado em {export_csv} com {count} entradas válidas.")
 
     if purge:
-        db_engine.purge()
-        console.print("Vault SheerDB limpo com sucesso.")
+        db.purge()
+        console.print("Vault removido com sucesso.")
 
     if not any([verify, export_csv, purge]):
-        console.print("Nenhuma operação selecionada. Use --verify, --export-csv ou --purge.")
+        console.print("Nenhuma operação escolhida. Use --help.")
 
 
-@app.command("axisfolds-lock")
-def axisfolds_lock(output: str = typer.Option("requirements_v2_0_3.folds")) -> None:
-    """Gera lock de dependências e metadados de integridade."""
+@app.command()
+def axisfolds(
+    output: str = typer.Option("requirements_v2_0_3.folds", help="Arquivo de lock de dependências."),
+    pyproject: str = typer.Option("pyproject.toml", help="Fonte de dependências."),
+) -> None:
+    """Gera arquivo de lock AxisFolds a partir do pyproject."""
 
     lock = AxisFoldsLock()
-    path = lock.write_folds_lock(output)
-    console.print(f"Lock gerado em {path}")
+    path = lock.write_folds_file(output_path=output, pyproject_path=pyproject)
+    console.print(f"🔒 AxisFolds lock gerado em {path}")
 
 
 def main() -> None:

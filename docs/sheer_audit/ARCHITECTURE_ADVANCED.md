@@ -9,19 +9,24 @@ A complexidade e o fluxo de execução são definidos pela função de transiç�
 $$F(x, y) = \sum_{i=1}^{n} \frac{\delta(Módulo_x)}{\partial(Etapa_y)}$$
 
 Onde:
-- **X**: Vetor de componentes (Classes/Funções).
-- **Y**: Sequência temporal de execução.
+- **X**: vetor de componentes (classes/funções).
+- **Y**: sequência de execução (profundidade lexical estática).
 
 ## 3. Matriz de Componentes
-O Sheer Audit mapeia a relação binária:
+A análise modela:
 
 $$R \subseteq C \times F \times E$$
 
-(Classe $\times$ Função $\times$ Execução)
+(Classe × Função × Execução)
 
-## 4. Fluxo IEEE no Sheer Audit
-1. **Ingestão Estática**: indexação de arquivos Python.
-2. **Instrumentação AST**: extração de classes, funções e chamadas.
-3. **Computação de Métricas**: complexidade e hotspots estruturais.
-4. **Persistência de Evidência**: findings assinados em SheerDB.
-5. **Sintetização IEEE**: manifesto e templates para documentação externa.
+## 4. Pipeline Avançado
+1. Ingestão estática do repositório.
+2. Instrumentação AST para mapear símbolos.
+3. Computação de métricas (profundidade, ciclos de import).
+4. Detecção de erros estruturais (syntax/circularidade).
+5. Exportação IEEE e manifesto de auditoria.
+
+## 5. Restrições Arquiteturais
+- Análise apenas estática/determinística.
+- Evidência verificável para cada finding.
+- Persistência com integridade HMAC em formato append-only.
